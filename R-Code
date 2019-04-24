@@ -1,0 +1,488 @@
+
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("caTools")
+install.packages("ROCR")
+install.packages("rpart")
+install.packages("rpart.plot")
+install.packages("caret")
+install.packages("e1071")
+install.packages("randomForest")
+install.packages("glmnet")
+install.packages("tidyverse")
+install.packages("mlr")
+install.packages("mice")
+install.packages("VIM")
+install.packages("lattice")
+install.packages("readr")
+
+library(dplyr)
+library(plyr)
+library(lubridate)
+library(magrittr)
+
+getwd()
+df<- read.csv("DAT102x_Predicting_Mortgage_Approvals_From_Government_Data_Training_inputs.csv")
+dflabel<- read.csv("DAT102x_Predicting_Mortgage_Approvals_From_Government_Data_Training_labels.csv")
+dftrain <- merge(df,dflabel,by="row_id")
+View(dftrain)
+head(dftrain)
+str(dftrain)
+summary(dftrain)
+ls(dftrain)
+
+hist(dftrain$loan_amount,breaks = 300, main = "Loan Amount Chart",xlab = "loan_amount",border="blue",col="green",xlim=c(0,2000))
+hist(dftrain$msa_md,breaks = 30, main = "Metropolitan Statistical Area Division",xlab = "msa_md",border="blue",col="green",xlim=c(0,450))
+hist(dftrain$applicant_income, breaks = 300, main = "Applicant Income",xlab = "lapplicant_income",border="blue",col="green",xlim=c(0,2000))
+hist(dftrain$population, breaks = 300, main = "Total population in tract",xlab = "population",border="blue",col="green",xlim=c(0,37097))
+hist(dftrain$ffiecmedian_family_income, breaks = 300, main = "FFIEC Median family income in dollars",xlab = "ffiecmedian_family_income")
+hist(dftrain$number_of_owner_occupied_units, breaks = 300, main = "Number of dwellings, including individual condominiums",xlab = "number_of_owner_occupied_units")
+hist(dftrain$number_of_1_to_4_family_units, breaks = 300, main = "Dwellings that are built to house fewer than 5 families",xlab = "number_of_1_to_4_family_units")
+
+boxplot(dftrain$msa_md)
+boxplot(dftrain$loan_amount)
+boxplot(dftrain$applicant_income)
+boxplot(dftrain$population)
+boxplot(dftrain$ffiecmedian_family_income)
+boxplot(dftrain$number_of_owner_occupied_units)
+boxplot(dftrain$number_of_1_to_4_family_units)
+
+#Categorical Variables as factor variables
+dftrain$lender <- as.factor(dftrain$lender)
+dftrain$loan_type <- as.factor(dftrain$loan_type)
+dftrain$property_type <- as.factor(dftrain$property_type)
+dftrain$loan_purpose <- as.factor(dftrain$loan_purpose)
+dftrain$occupancy <- as.factor(dftrain$occupancy)
+dftrain$preapproval <- as.factor(dftrain$preapproval)
+dftrain$applicant_ethnicity <- as.factor(dftrain$applicant_ethnicity)
+dftrain$applicant_race <- as.factor(dftrain$applicant_race)
+dftrain$applicant_sex <- as.factor(dftrain$applicant_sex)
+dftrain$lender <- as.factor(dftrain$lender)
+dftrain$accepted <- as.factor(dftrain$accepted)
+dftrain$minority_population_pct <- as.integer(dftrain$minority_population_pct)
+dftrain$tract_to_msa_md_income_pct <- as.integer(dftrain$tract_to_msa_md_income_pct)
+
+#co_applicant changing from true false to 0 and 1 and then as factor
+dftrain <- dftrain %>%
+mutate(co_applicant = ifelse(co_applicant == "FALSE",0,1))
+dftrain$co_applicant <- as.factor(dftrain$co_applicant)
+
+View(dftrain)
+summary(dftrain)
+
+#outlier treatment
+vec1<-boxplot.stats(dftrain$loan_amount)$out;
+dftrain$loan_amount[dftrain$loan_amount%in%vec1]<-median(dftrain$loan_amount)
+summary(dftrain$loan_amount)
+boxplot(dftrain$loan_amount)
+
+vec2<-boxplot.stats(dftrain$applicant_income)$out;
+dftrain$applicant_income[dftrain$applicant_income%in%vec2]<-median(dftrain$applicant_income)
+summary(dftrain$applicant_income)
+boxplot(dftrain$applicant_income)
+
+vec3<-boxplot.stats(dftrain$population)$out;
+dftrain$population[dftrain$population%in%vec3]<-median(dftrain$population)
+summary(dftrain$population)
+boxplot(dftrain$population)
+
+vec4<-boxplot.stats(dftrain$ffiecmedian_family_income)$out;
+dftrain$ffiecmedian_family_income[dftrain$ffiecmedian_family_income%in%vec4]<-median(dftrain$ffiecmedian_family_income)
+summary(dftrain$ffiecmedian_family_income)
+boxplot(dftrain$ffiecmedian_family_income)
+
+vec5<-boxplot.stats(dftrain$number_of_owner_occupied_units)$out;
+dftrain$number_of_owner_occupied_units[dftrain$number_of_owner_occupied_units%in%vec5]<-median(dftrain$number_of_owner_occupied_units)
+summary(dftrain$number_of_owner_occupied_units)
+boxplot(dftrain$number_of_owner_occupied_units)
+
+vec6<-boxplot.stats(dftrain$number_of_1_to_4_family_units)$out;
+dftrain$number_of_1_to_4_family_units[dftrain$number_of_1_to_4_family_units%in%vec6]<-median(dftrain$number_of_1_to_4_family_units)
+summary(dftrain$number_of_1_to_4_family_units)
+boxplot(dftrain$number_of_1_to_4_family_units)
+
+library(mlr)
+#impute missing values by mean and mode, matter of few seconds or minutes, quickest
+imp <- impute(dftrain, classes = list(factor = imputeMode(), integer = imputeMean()), dummy.classes = c("integer","factor"), dummy.type = "numeric")
+imp_train <- imp$data
+summarizeColumns(imp_train)
+View(imp_train)
+summary(imp_train)
+
+# Performing Similar actions for Testing Data Set
+getwd()
+dftest <- read.csv("DAT102x_Predicting_Mortgage_Approvals_From_Government_Data_Test_values.csv")
+View(dftest)
+head(dftest)
+str(dftest)
+summary(dftest)
+ls(dftest)
+summarizeColumns(dftest)
+
+hist(dftest$loan_amount,breaks = 500, main = "Loan Amount Chart",xlab = "loan_amount",border="blue",col="green",xlim=c(0,1000))
+hist(dftest$msa_md, breaks = 300, main = "Metropolitan Statistical Area/Metropolitan Division",xlab = "msa_md")
+hist(dftest$applicant_income, breaks = 300, main = "Applicant Income",xlab = "lapplicant_income", xlim=c(0,300))
+hist(dftest$population, breaks = 300, main = "Total population in tract",xlab = "population",xlim=c(0,12000))
+hist(dftest$ffiecmedian_family_income, breaks = 300, main = "FFIEC Median family income in dollars",xlab = "ffiecmedian_family_income",xlim=c(19000,115000))
+hist(dftest$number_of_owner_occupied_units, breaks = 300, main = "Number of dwellings, including individual condominiums",xlab = "number_of_owner_occupied_units",xlim=c(0,3500))
+hist(dftest$number_of_1_to_4_family_units, breaks = 300, main = "Dwellings that are built to house fewer than 5 families",xlab = "number_of_1_to_4_family_units",xlim=c(0,4500))
+
+boxplot(dftest$msa_md)
+boxplot(dftest$loan_amount)
+boxplot(dftest$applicant_income)
+boxplot(dftest$population)
+boxplot(dftest$ffiecmedian_family_income)
+boxplot(dftest$number_of_owner_occupied_units)
+boxplot(dftest$number_of_1_to_4_family_units)
+
+#Categorical Variables as factor variables
+dftest$lender <- as.factor(dftest$lender)
+dftest$loan_type <- as.factor(dftest$loan_type)
+dftest$property_type <- as.factor(dftest$property_type)
+dftest$loan_purpose <- as.factor(dftest$loan_purpose)
+dftest$occupancy <- as.factor(dftest$occupancy)
+dftest$preapproval <- as.factor(dftest$preapproval)
+dftest$applicant_ethnicity <- as.factor(dftest$applicant_ethnicity)
+dftest$applicant_race <- as.factor(dftest$applicant_race)
+dftest$applicant_sex <- as.factor(dftest$applicant_sex)
+dftest$lender <- as.factor(dftest$lender)
+dftest$minority_population_pct <- as.integer(dftest$minority_population_pct)
+dftest$tract_to_msa_md_income_pct <- as.integer(dftest$tract_to_msa_md_income_pct)
+
+
+#co_applicant changing from true false to 0 and 1 and then as factor
+dftest <- dftest %>%
+mutate(co_applicant = ifelse(co_applicant == "FALSE",0,1))
+dftest$co_applicant <- as.factor(dftest$co_applicant)
+
+View(dftest)
+summary(dftest)
+
+#outlier treatment
+vec1<-boxplot.stats(dftest$loan_amount)$out;
+dftest$loan_amount[dftest$loan_amount%in%vec1]<-median(dftest$loan_amount)
+summary(dftest$loan_amount)
+boxplot(dftest$loan_amount)
+
+vec2<-boxplot.stats(dftest$applicant_income)$out;
+dftest$applicant_income[dftest$applicant_income%in%vec2]<-median(dftest$applicant_income)
+summary(dftest$applicant_income)
+boxplot(dftest$applicant_income)
+
+vec3<-boxplot.stats(dftest$population)$out;
+dftest$population[dftest$population%in%vec3]<-median(dftest$population)
+summary(dftest$population)
+boxplot(dftest$population)
+
+vec4<-boxplot.stats(dftest$ffiecmedian_family_income)$out;
+dftest$ffiecmedian_family_income[dftest$ffiecmedian_family_income%in%vec4]<-median(dftest$ffiecmedian_family_income)
+summary(dftest$ffiecmedian_family_income)
+boxplot(dftest$ffiecmedian_family_income)
+
+vec5<-boxplot.stats(dftest$number_of_owner_occupied_units)$out;
+dftest$number_of_owner_occupied_units[dftest$number_of_owner_occupied_units%in%vec5]<-median(dftest$number_of_owner_occupied_units)
+summary(dftest$number_of_owner_occupied_units)
+boxplot(dftest$number_of_owner_occupied_units)
+
+vec6<-boxplot.stats(dftest$number_of_1_to_4_family_units)$out;
+dftest$number_of_1_to_4_family_units[dftest$number_of_1_to_4_family_units%in%vec6]<-median(dftest$number_of_1_to_4_family_units)
+summary(dftest$number_of_1_to_4_family_units)
+boxplot(dftest$number_of_1_to_4_family_units)
+
+library(mlr)
+#impute missing values by mean and mode, matter of few seconds or minutes, quickest
+imp <- impute(dftest, classes = list(factor = imputeMode(), integer = imputeMean()), dummy.classes = c("integer","factor"), dummy.type = "numeric")
+imp_test <- imp$data
+summarizeColumns(imp_test)
+View(imp_test)
+summary(imp_test)
+
+summarizeColumns(imp_train)
+summarizeColumns(imp_test)
+summary(imp_train)
+summary(imp_test)
+
+imp_test$accepted <- sample(0:1,size = 500000,replace = T) # Add Column with 0 and 1 values
+
+cd_test<-imp_test
+cd_train<-imp_train
+
+#Changing dummy variables to categorical variables
+
+summarizeColumns(cd_train)
+summary(cd_train)
+View(cd_train)
+ls(cd_train)
+head(cd_train)
+str(cd_train)
+
+#convert numeric to factor - train
+for (f in names(cd_train[, c(24:30)])) {
+  if( class(cd_train[, c(24:30)] [[f]]) == "numeric"){
+    levels <- unique(cd_train[, c(24:30)][[f]])
+    cd_train[, c(24:30)][[f]] <- as.factor(factor(cd_train[, c(24:30)][[f]], levels = levels))
+  }
+}
+
+summarizeColumns(cd_test)
+summary(cd_test)
+View(cd_test)
+ls(cd_test)
+head(cd_test)
+str(cd_test)
+
+#convert numeric to factor - test
+for (f in names(cd_test[, c(23:29)])) {
+  if( class(cd_test[, c(23:29)] [[f]]) == "numeric"){
+    levels <- unique(cd_test[, c(23:29)][[f]])
+    cd_test[, c(23:29)][[f]] <- as.factor(factor(cd_test[, c(23:29)][[f]], levels = levels))
+  }
+}
+
+#splitting the data based on class
+az <- split(names(cd_train), sapply(cd_train, function(x){ class(x)}))
+
+#creating a data frame of numeric variables
+xs <- cd_train[az$numeric]
+
+#check correlation
+cor(xs)
+res <- cor(xs)
+write.csv(res, file = "Corelation Matrix.csv")
+round(res, 2)
+
+cd_train$number_of_owner_occupied_units <- NULL
+cd_test$number_of_owner_occupied_units <- NULL
+cd_train$number_of_1_to_4_family_units <- NULL
+cd_test$number_of_1_to_4_family_units <- NULL
+
+cd_train[,"lender"] <- factor(cd_train[,"lender"], levels=levels(factor(c(levels(cd_train$lender),levels(cd_test$lender)))))
+cd_test[,"lender"] <- factor(cd_test[,"lender"], levels=levels(factor(c(levels(cd_train$lender),levels(cd_test$lender)))))
+
+cd_test$accepted <- as.factor(cd_test$accepted)
+cd_test$lender <- as.numeric(cd_test$lender)
+cd_train$lender <- as.numeric(cd_train$lender) 
+
+summarizeColumns(cd_train)
+summarizeColumns(cd_test)
+summary(cd_train)
+summary(cd_test)
+View(cd_train)
+View(cd_test)
+
+#create a task since this is a classification problem
+trainTask <- makeClassifTask(data = cd_train,target = "accepted")
+testTask <- makeClassifTask(data = cd_test, target = "accepted")
+trainTask
+testTask
+
+trainTask <- makeClassifTask(data = cd_train,target = "accepted", positive = "1")
+str(getTaskData(trainTask))
+
+#normalize the variables
+trainTask <- normalizeFeatures(trainTask,method = "standardize")
+testTask <- normalizeFeatures(testTask,method = "standardize")
+ls(cd_train)
+ls(cd_test)
+summary(trainTask)
+summary(testTask)
+
+trainTask <- dropFeatures(task = trainTask,features = c("row_id"))
+
+#Feature importance
+im_feat <- generateFilterValuesData(trainTask, method = c("information.gain","chi.squared"))
+plotFilterValues(im_feat,n.show = 20)
+
+# 1 Quadratic Discriminant Analysis (QDA)
+#load qda 
+qda.learner <- makeLearner("classif.qda", predict.type = "response")
+#train model
+qmodel <- train(qda.learner, trainTask)
+#predict on test data
+qpredict <- predict(qmodel, testTask)
+#create submission file
+submit <- data.frame(row_id = dftest$row_id, accepted = qpredict$data$response)
+write.csv(submit, "Quadratic Discriminant Analysis.csv",row.names = F)
+
+#2. logistic regression
+logistic.learner <- makeLearner("classif.logreg",predict.type = "response")
+#cross validation (cv) accuracy
+cv.logistic <- crossval(learner = logistic.learner,task = trainTask,iters = 3,stratify = TRUE,measures = acc,show.info = F)
+#cross validation accuracy
+cv.logistic$aggr
+#to see, respective accuracy each fold, we can do this:
+cv.logistic$measures.test
+#train model
+fmodel <- train(logistic.learner,trainTask)
+getLearnerModel(fmodel)
+#predict on test data
+fpmodel <- predict(fmodel, testTask)
+#create submission file
+submit <- data.frame(row_id = dftest$row_id, accepted = fpmodel$data$response)
+write.csv(submit, "Logistic Regression.csv",row.names = F)
+
+#3 Decision Tree
+getParamSet("classif.rpart")
+#This will return a long list of tunable and non-tunable parameters. 
+#Let’s build a decision tree now. 
+#make tree learner
+makeatree <- makeLearner("classif.rpart", predict.type = "response")
+#set 3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+#Now, let’s set tunable parameters:
+#Search for hyperparameters
+gs <- makeParamSet(
+    makeIntegerParam("minsplit",lower = 10, upper = 50),
+    makeIntegerParam("minbucket", lower = 5, upper = 50),
+    makeNumericParam("cp", lower = 0.001, upper = 0.2)
+  )
+ 
+#do a grid search
+gscontrol <- makeTuneControlGrid()
+#hypertune the parameters
+stune <- tuneParams(learner = makeatree, resampling = set_cv, task = trainTask, par.set = gs, control = gscontrol, measures = acc)
+#check best parameter
+stune$x
+#cross validation result
+stune$y
+#Using setHyperPars function, 
+#we can directly set the best parameters as modeling parameters in the algorithm.
+#using hyperparameters for modeling
+t.tree <- setHyperPars(makeatree, par.vals = stune$x)
+#train the model
+t.rpart <- train(t.tree, trainTask)
+getLearnerModel(t.rpart)
+#make predictions
+tpmodel <- predict(t.rpart, testTask)
+#create a submission file
+submit <- data.frame(row_id = dftest$row_id, accepted = tpmodel$data$response)
+write.csv(submit, "Decision Tree.csv",row.names = F)
+
+# 4. Random Forest
+getParamSet("classif.randomForest")
+#create a learner
+rf <- makeLearner("classif.randomForest", predict.type = "response", par.vals = list(ntree = 200, mtry = 3))
+rf$par.vals <- list(importance = TRUE)
+#set tunable parameters
+#grid search to find hyperparameters
+rf_param <- makeParamSet(
+  makeIntegerParam("ntree",lower = 50, upper = 500),
+  makeIntegerParam("mtry", lower = 3, upper = 10),
+  makeIntegerParam("nodesize", lower = 10, upper = 50)
+)
+#let's do random search for 50 iterations
+rancontrol <- makeTuneControlRandom(maxit = 50L)
+#set 3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+#hypertuning
+rf_tune <- tuneParams(learner = rf, resampling = set_cv, task = trainTask, par.set = rf_param, control = rancontrol, measures = acc)
+#Now, we have the final parameters. Let’s check the list of parameters and CV accuracy.
+#cv accuracy
+rf_tune$y
+#best parameters
+rf_tune$x
+#Let’s build the random forest model now and check its accuracy.
+#using hyperparameters for modeling
+rf.tree <- setHyperPars(rf, par.vals = rf_tune$x)
+#train a model
+rforest <- train(rf.tree, trainTask)
+getLearnerModel(t.rpart)
+#make predictions
+rfmodel <- predict(rforest, testTask)
+#submission file
+submit <- data.frame(row_id = dftest$row_id, accepted = rfmodel$data$response)
+write.csv(submit, "Random Forest Model.csv",row.names = F)
+
+#5. Special Vector Machine
+#load svm
+getParamSet("classif.ksvm") #do install kernlab package 
+ksvm <- makeLearner("classif.ksvm", predict.type = "response")
+#Set parameters
+pssvm <- makeParamSet(
+  makeDiscreteParam("C", values = 2^c(-8,-4,-2,0)), #cost parameters
+  makeDiscreteParam("sigma", values = 2^c(-8,-4,0,4)) #RBF Kernel Parameter
+)
+#search function
+ctrl <- makeTuneControlGrid()
+#tune model
+res <- tuneParams(ksvm, task = trainTask, resampling = set_cv, par.set = pssvm, control = ctrl,measures = acc)
+#CV accuracy
+res$y
+#set the model with best params
+t.svm <- setHyperPars(ksvm, par.vals = res$x)
+#train
+par.svm <- train(ksvm, trainTask)
+#test
+predict.svm <- predict(par.svm, testTask)
+#submission file
+submit <- data.frame(row_id = dftest$row_id, accepted = predict.svm$data$response)
+write.csv(submit, "Special Vector Machine.csv",row.names = F)
+
+#6. GBM 
+#load GBM
+getParamSet("classif.gbm")
+g.gbm <- makeLearner("classif.gbm", predict.type = "response")
+#specify tuning method
+rancontrol <- makeTuneControlRandom(maxit = 50L)
+#3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+#parameters
+gbm_par<- makeParamSet(
+  makeDiscreteParam("distribution", values = "bernoulli"),
+  makeIntegerParam("n.trees", lower = 100, upper = 1000), #number of trees
+  makeIntegerParam("interaction.depth", lower = 2, upper = 10), #depth of tree
+  makeIntegerParam("n.minobsinnode", lower = 10, upper = 80),
+  makeNumericParam("shrinkage",lower = 0.01, upper = 1)
+)
+
+#tune parameters
+tune_gbm <- tuneParams(learner = g.gbm, task = trainTask,resampling = set_cv,measures = acc,par.set = gbm_par,control = rancontrol)
+#check CV accuracy
+tune_gbm$y
+#set parameters
+final_gbm <- setHyperPars(learner = g.gbm, par.vals = tune_gbm$x)
+#train
+to.gbm <- train(final_gbm, traintask)
+#test 
+pr.gbm <- predict(to.gbm, testTask)
+#submission file
+submit <- data.frame(row_id = dftest$row_id, accepted = pr.gbm$data$response)
+write.csv(submit, "GBM.csv",row.names = F)
+
+#7.load xgboost
+set.seed(1001)
+getParamSet("classif.xgboost")
+#make learner with inital parameters
+xg_set <- makeLearner("classif.xgboost", predict.type = "response")
+xg_set$par.vals <- list(
+  objective = "binary:logistic",
+  eval_metric = "error",
+  nrounds = 250
+)
+
+#define parameters for tuning
+xg_ps <- makeParamSet(
+  makeIntegerParam("nrounds",lower=200,upper=600),
+  makeIntegerParam("max_depth",lower=3,upper=20),
+  makeNumericParam("lambda",lower=0.55,upper=0.60),
+  makeNumericParam("eta", lower = 0.001, upper = 0.5),
+  makeNumericParam("subsample", lower = 0.10, upper = 0.80),
+  makeNumericParam("min_child_weight",lower=1,upper=5),
+  makeNumericParam("colsample_bytree",lower = 0.2,upper = 0.8)
+)
+#define search function
+rancontrol <- makeTuneControlRandom(maxit = 100L) #do 100 iterations
+#3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+#tune parameters
+xg_tune <- tuneParams(learner = xg_set, task = trainTask, resampling = set_cv,measures = acc,par.set = xg_ps, control = rancontrol)
+#set parameters
+xg_new <- setHyperPars(learner = xg_set, par.vals = xg_tune$x)
+#train model
+xgmodel <- train(xg_new, trainTask)
+#test model
+predict.xg <- predict(xgmodel, testTask)
+#submission file
+submit <- data.frame(row_id = dftest$row_id, accepted = predict.xg$data$response)
+write.csv(submit, "XGBoost.csv",row.names = F)
+
